@@ -1,5 +1,7 @@
 """Fonte bitmap 5×7 inspirada em jogos de arcade de 8 bits."""
 
+from __future__ import annotations
+
 import unicodedata
 
 import pygame
