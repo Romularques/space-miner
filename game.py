@@ -11,7 +11,7 @@ if sys.platform == "emscripten":
 else:
     from high_scores import HighScores
 from monster import Monster
-from medkit import Medkit
+from powerup import Powerup
 from pixel_font import PixelFont
 from player import Player
 from settings import (
@@ -70,8 +70,10 @@ class Game:
         self.damage_flash_ms = 0.0
         self.monster: Monster | None = None
         self.monster_roll_ms = 0.0
-        self.medkit: Medkit | None = None
-        self.medkit_roll_ms = 0.0
+        self.powerups: dict[str, Powerup | None] = {"medkit": None, "clock": None, "bomb": None}
+        self.powerup_roll_ms = {"medkit": 0.0, "clock": 0.0, "bomb": 0.0}
+        self.slow_motion_ms = 0.0
+        self.bomb_flash_ms = 0.0
         self.background = self.generate_background()
 
     def generate_background(self) -> pygame.Surface:
@@ -145,9 +147,8 @@ class Game:
         return min(0.30, 0.05 + (self.phase - 1) * (0.25 / 9))
 
     def monster_speed(self) -> float:
-        """0,8× da velocidade-base na Fase 1, chegando a 1,5× na Fase 10."""
-        multiplier = min(1.50, 0.80 + (self.phase - 1) * (0.70 / 9))
-        return Monster.BASE_SPEED * multiplier
+        """Progressão linear: 400 px/s na Fase 1 até 600 px/s na Fase 15."""
+        return min(600.0, 400.0 + (self.phase - 1) * (200.0 / 14))
 
     def add_feedback(self, value: int, position: tuple[int, int]) -> None:
         self.feedbacks.append([str(value), pygame.Vector2(position), 0.0])
@@ -218,18 +219,59 @@ class Game:
             if explosion[1] > 360:
                 self.explosions.remove(explosion)
 
+    def detonate_bomb(self) -> None:
+        """Destrói tudo em cena; minerais comuns contam como coleta pontuada."""
+        for number in self.numbers:
+            if not number.radioactive:
+                self.score += number.current_value
+                self.collected += 1
+                self.add_feedback(number.current_value, number.rect.midtop)
+        self.numbers.clear()
+        self.monster = None
+        for kind in self.powerups:
+            self.powerups[kind] = None
+        self.bomb_flash_ms = 150
+        if self.collected >= self.numbers_needed():
+            self.finish_phase()
+
+    def update_powerups(self, dt: float, slowed_dt: float) -> None:
+        """Atualiza duração desacelerada dos itens e sorteia cada tipo a cada segundo real."""
+        for kind in tuple(self.powerups):
+            item = self.powerups[kind]
+            if item:
+                if item.update(slowed_dt):
+                    self.powerups[kind] = None
+                elif self.player.rect.colliderect(item.rect):
+                    self.powerups[kind] = None
+                    if kind == "medkit":
+                        self.energy = 10
+                    elif kind == "clock":
+                        self.slow_motion_ms = 3_000
+                    else:
+                        self.detonate_bomb()
+                        return
+            else:
+                self.powerup_roll_ms[kind] += dt * 1000
+                if self.powerup_roll_ms[kind] >= 1_000:
+                    self.powerup_roll_ms[kind] -= 1_000
+                    if random.random() < 0.02:
+                        self.powerups[kind] = Powerup(kind)
+
     def update(self, dt: float) -> None:
         self.damage_flash_ms = max(0, self.damage_flash_ms - dt * 1000)
+        self.bomb_flash_ms = max(0, self.bomb_flash_ms - dt * 1000)
         self.update_explosions(dt)
         if self.story_screen or self.instructions_screen or self.title_screen or self.game_over or self.phase_complete:
             return
+        self.slow_motion_ms = max(0, self.slow_motion_ms - dt * 1000)
+        slowed_dt = dt * (0.10 if self.slow_motion_ms > 0 else 1.0)
         self.player.update(dt)
-        self.spawn_elapsed_ms += dt * 1000
+        self.spawn_elapsed_ms += slowed_dt * 1000
         if self.spawn_elapsed_ms >= self.spawn_interval_ms() and len(self.numbers) < self.max_numbers():
             self.numbers.append(FallingNumber())
             self.spawn_elapsed_ms = 0
         if self.monster:
-            if self.monster.update(dt):
+            if self.monster.update(slowed_dt):
                 self.monster = None
             elif self.player.rect.colliderect(self.monster.rect):
                 self.lose_energy(3)
@@ -242,7 +284,7 @@ class Game:
                     self.monster = Monster(random.choice((True, False)), self.monster_speed())
 
         for number in self.numbers[:]:
-            reached_ground = number.update(dt)
+            reached_ground = number.update(slowed_dt)
             if self.player.rect.colliderect(number.rect):
                 self.numbers.remove(number)
                 if number.radioactive:
@@ -264,18 +306,7 @@ class Game:
                 self.numbers.remove(number)
                 if self.game_over:
                     break
-        if self.medkit:
-            if self.medkit.update(dt):
-                self.medkit = None
-            elif self.player.rect.colliderect(self.medkit.rect):
-                self.energy = 10
-                self.medkit = None
-        else:
-            self.medkit_roll_ms += dt * 1000
-            if self.medkit_roll_ms >= 1_000:
-                self.medkit_roll_ms -= 1_000
-                if random.random() < 0.02:
-                    self.medkit = Medkit()
+        self.update_powerups(dt, slowed_dt)
         self.update_feedbacks(dt)
 
     def draw_hud(self) -> None:
@@ -283,8 +314,9 @@ class Game:
         score = self.hud_font.render(f"Pontos: {self.score}", False, (255, 255, 255))
         energy = self.hud_font.render("Energia", False, (255, 255, 255))
         collected = self.hud_font.render(f"Minerais coletados: {self.collected}/{self.numbers_needed()}", False, (255, 255, 255))
-        self.screen.blit(phase, (20, 14))
-        self.screen.blit(score, (20, 45))
+        # Informações de progresso ficam no rodapé, sobre a faixa verde do chão.
+        self.screen.blit(phase, (20, GROUND_TOP + 12))
+        self.screen.blit(score, (WIDTH - score.get_width() - 20, GROUND_TOP + 33))
         segment_width, segment_gap = 10, 2
         bar_width = 10 * segment_width + 9 * segment_gap
         label_x = WIDTH - energy.get_width() - 8 - bar_width - 20
@@ -296,7 +328,7 @@ class Game:
             pygame.draw.rect(self.screen, (33, 39, 52), segment.inflate(3, 3))
             if index < self.energy:
                 pygame.draw.rect(self.screen, bar_color, segment)
-        self.screen.blit(collected, (20, 76))
+        self.screen.blit(collected, (20, GROUND_TOP + 39))
 
     def draw_overlay(self) -> None:
         overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
@@ -322,7 +354,7 @@ class Game:
                 ]
             else:
                 lines = [
-                    f"Você coletou {self.collected}/{self.numbers_needed()} estrelas!",
+                    f"Você coletou {self.collected}/{self.numbers_needed()} minerais!",
                     f"Bônus de energia disponível: {self.energy} × {self.ENERGY_BONUS} = {self.phase_bonus}",
                     "Pressione Enter ou Espaço para receber o bônus",
                 ]
@@ -360,15 +392,16 @@ class Game:
         self.screen.blit(self.background, (0, 0))
         pygame.draw.rect(self.screen, GROUND_COLOR, (0, GROUND_TOP, WIDTH, HEIGHT - GROUND_TOP))
         pygame.draw.line(self.screen, (141, 202, 111), (0, GROUND_TOP), (WIDTH, GROUND_TOP), 4)
-        # Estrelas e blocos de solo reforçam a leitura arcade com paleta limitada.
+        # Minerais e blocos de solo reforçam a leitura arcade com paleta limitada.
         for x, y in ((80, 90), (195, 145), (330, 65), (520, 125), (690, 75), (850, 155)):
             pygame.draw.rect(self.screen, (220, 236, 255), (x, y, 4, 4))
         for x in range(0, WIDTH, 32):
             pygame.draw.rect(self.screen, (86, 126, 70), (x, GROUND_TOP + 15, 22, 7))
         for number in self.numbers:
             number.draw(self.screen, self.number_font)
-        if self.medkit:
-            self.medkit.draw(self.screen)
+        for item in self.powerups.values():
+            if item:
+                item.draw(self.screen)
         self.draw_explosions()
         if self.monster:
             self.monster.draw(self.screen)
@@ -430,6 +463,10 @@ class Game:
         if self.damage_flash_ms > 0:
             flash = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
             flash.fill((255, 35, 45, round(150 * self.damage_flash_ms / 140)))
+            self.screen.blit(flash, (0, 0))
+        if self.bomb_flash_ms > 0:
+            flash = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+            flash.fill((255, 255, 255, round(220 * self.bomb_flash_ms / 150)))
             self.screen.blit(flash, (0, 0))
         window_width, window_height = self.window.get_size()
         scale = min(window_width / WIDTH, window_height / HEIGHT)
