@@ -11,7 +11,7 @@ from shutil import copy2, rmtree
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / ".web-source"
 FILES = (
-    "main.py", "game.py", "settings.py", "player.py", "monster.py",
+    "main.py", "game.py", "settings.py", "player.py", "monster.py", "medkit.py",
     "falling_number.py", "pixel_font.py", "global_scores.py", "web_config.py",
 )
 
