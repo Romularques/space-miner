@@ -17,11 +17,11 @@ class FallingNumber:
 
     def __init__(self) -> None:
         self.initial_value = random.randint(10, 20)
-        self.final_ground_value = random.randint(-10, -5)
+        self.final_ground_value = random.randint(-5, 0)
         self.required_losses = self.initial_value - self.final_ground_value
         # Quanto maior a diferença de pontos, menor a duração e maior a velocidade inicial da queda.
-        # Com valores 10–20 e finais −10–−5, a diferença possível é 15–30.
-        min_losses, max_losses = 15, 30
+        # Com valores 10–20 e finais −5–0, a diferença possível é 10–25.
+        min_losses, max_losses = 10, 25
         ratio = (self.required_losses - min_losses) / (max_losses - min_losses)
         self.fall_time_ms = round(FALL_TIME_MAX_MS - ratio * (FALL_TIME_MAX_MS - FALL_TIME_MIN_MS))
         self.current_value = self.initial_value

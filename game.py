@@ -43,10 +43,12 @@ class Game:
         self.high_scores = GlobalScores() if sys.platform == "emscripten" else HighScores()
         self.running = True
         self.last_direction_tap = {-1: -1_000, 1: -1_000}
-        self.story_screen = True
+        self.menu_screen = True
+        self.story_screen = False
         self.instructions_screen = False
         self.title_screen = False
         self.reset()
+        self.menu_background = self.generate_menu_background()
 
     def reset(self) -> None:
         self.player = Player()
@@ -120,6 +122,23 @@ class Game:
         pygame.draw.polygon(background, mountain_color, points)
         return background
 
+    def generate_menu_background(self) -> pygame.Surface:
+        """Fundo exclusivo das telas iniciais: apenas espaço escuro e astros discretos."""
+        background = pygame.Surface((WIDTH, HEIGHT))
+        background.fill((4, 15, 25))
+        for x, y, size, color in ((92, 83, 3, (119, 242, 207)), (250, 155, 2, (94, 156, 168)), (642, 106, 3, (176, 226, 237)), (856, 202, 2, (120, 232, 205)), (735, 390, 3, (114, 188, 209))):
+            pygame.draw.rect(background, color, (x, y, size, size))
+        pygame.draw.circle(background, (19, 48, 63), (145, 132), 44)
+        pygame.draw.circle(background, (24, 59, 70), (815, 102), 61)
+        pygame.draw.circle(background, (35, 80, 84), (815, 102), 10)
+        pygame.draw.line(background, (38, 88, 91), (750, 102), (880, 102), 3)
+        return background
+
+    def return_to_menu(self) -> None:
+        self.reset()
+        self.menu_screen = True
+        self.story_screen = self.instructions_screen = self.title_screen = False
+
     def lose_energy(self, amount: int) -> None:
         self.energy = max(0, self.energy - amount)
         self.damage_flash_ms = 140
@@ -179,14 +198,24 @@ class Game:
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     self.running = False
+                elif self.menu_screen:
+                    if event.key == pygame.K_SPACE:
+                        self.menu_screen = False
+                        self.story_screen = True
+                        self.audio.play("poc")
+                    elif event.key == pygame.K_a:
+                        self.menu_screen = False
+                        self.instructions_screen = True
+                        self.audio.play("poc")
                 elif self.story_screen:
-                    self.story_screen = False
-                    self.instructions_screen = True
-                    self.audio.play("poc")
+                    if event.key == pygame.K_SPACE:
+                        self.story_screen = False
+                        self.audio.play("poc")
                 elif self.instructions_screen:
-                    self.instructions_screen = False
-                    self.title_screen = True
-                    self.audio.play("poc")
+                    if event.key == pygame.K_b:
+                        self.instructions_screen = False
+                        self.menu_screen = True
+                        self.audio.play("poc")
                 elif self.title_screen:
                     self.title_screen = False
                     self.audio.play("poc")
@@ -197,9 +226,9 @@ class Game:
                         self.player.dash(direction)
                         self.audio.play("vuush")
                     self.last_direction_tap[direction] = now
-                elif self.game_over and event.key in (pygame.K_r, pygame.K_RETURN, pygame.K_SPACE):
-                    if not self.name_entry:
-                        self.reset()
+                elif self.game_over and not self.name_entry:
+                    if event.key == pygame.K_SPACE:
+                        self.return_to_menu()
                         self.audio.play("poc")
                 elif self.phase_complete and event.key in (pygame.K_RETURN, pygame.K_SPACE):
                     if not self.phase_bonus_awarded:
@@ -237,14 +266,13 @@ class Game:
                 self.explosions.remove(explosion)
 
     def detonate_bomb(self) -> None:
-        """Destrói tudo em cena; minerais comuns contam como coleta pontuada."""
+        """Destrói tudo em cena; minerais rendem pontos, sem avançar a meta."""
         for number in self.numbers:
             if number.radioactive:
                 self.score += 10
                 self.add_feedback(10, number.rect.midtop)
             else:
                 self.score += number.current_value
-                self.collected += 1
                 self.add_feedback(number.current_value, number.rect.midtop)
         self.numbers.clear()
         if self.monster:
@@ -255,8 +283,6 @@ class Game:
         for kind in self.powerups:
             self.powerups[kind] = None
         self.bomb_flash_ms = 150
-        if self.collected >= self.numbers_needed():
-            self.finish_phase()
 
     def update_powerups(self, dt: float, slowed_dt: float) -> None:
         """Atualiza duração desacelerada dos itens e sorteia cada tipo a cada segundo real."""
@@ -267,6 +293,9 @@ class Game:
                     self.powerups[kind] = None
                 elif self.player.rect.colliderect(item.rect):
                     self.powerups[kind] = None
+                    # Todo bônus é uma escolha vantajosa e rende pontos imediatamente.
+                    self.score += 10
+                    self.add_feedback(10, item.rect.midtop)
                     if kind == "medkit":
                         self.energy = 10
                         self.audio.play("medkit")
@@ -288,7 +317,7 @@ class Game:
         self.damage_flash_ms = max(0, self.damage_flash_ms - dt * 1000)
         self.bomb_flash_ms = max(0, self.bomb_flash_ms - dt * 1000)
         self.update_explosions(dt)
-        if self.story_screen or self.instructions_screen or self.title_screen or self.game_over or self.phase_complete:
+        if self.menu_screen or self.story_screen or self.instructions_screen or self.title_screen or self.game_over or self.phase_complete:
             return
         was_slow = self.slow_motion_ms > 0
         self.slow_motion_ms = max(0, self.slow_motion_ms - dt * 1000)
@@ -351,7 +380,7 @@ class Game:
         phase = self.hud_font.render(f"Fase: {self.phase}", False, (255, 255, 255))
         score = self.hud_font.render(f"Pontos: {self.score}", False, (255, 255, 255))
         energy = self.hud_font.render("Energia", False, (255, 255, 255))
-        collected = self.hud_font.render(f"Minerais coletados: {self.collected}/{self.numbers_needed()}", False, (255, 255, 255))
+        collected = self.hud_font.render(f"Minerios: {self.collected}/{self.numbers_needed()}", False, (255, 255, 255))
         # Informações de progresso ficam no rodapé, sobre a faixa verde do chão.
         self.screen.blit(phase, (20, GROUND_TOP + 12))
         self.screen.blit(score, (WIDTH - score.get_width() - 20, GROUND_TOP + 33))
@@ -381,7 +410,7 @@ class Game:
                     f"[ {self.initials.ljust(3, '_')} ]",
                 ])
             else:
-                lines.append("Pressione R, Enter ou Espaço para reiniciar")
+                lines.append("[ESPACO] VOLTAR AO COMECO")
         else:
             title = self.title_font.render(f"FASE {self.phase} CONCLUÍDA!", False, (110, 235, 152))
             if self.phase_bonus_awarded:
@@ -425,7 +454,86 @@ class Game:
                 pygame.draw.rect(self.screen, color, (position.x + offset - 4, position.y - size // 2, 8, size))
                 pygame.draw.rect(self.screen, color, (position.x - size // 2, position.y + offset - 4, size, 8))
 
+    def draw_keycap(self, label: str, x: int, y: int, wide: bool = False) -> None:
+        rect = pygame.Rect(x, y, 64 if not wide else 140, 42)
+        pygame.draw.rect(self.screen, (29, 47, 58), rect.inflate(4, 4))
+        pygame.draw.rect(self.screen, (235, 243, 240), rect)
+        pygame.draw.rect(self.screen, (63, 83, 91), rect, 3)
+        glyph = self.info_font.render(label, False, (8, 27, 37))
+        self.screen.blit(glyph, glyph.get_rect(center=rect.center))
+
+    def draw_instructions_screen(self) -> None:
+        title = self.title_font.render("COMO JOGAR", False, (112, 232, 157))
+        self.screen.blit(title, title.get_rect(center=(WIDTH // 2, 55)))
+        self.draw_keycap("<", 115, 125); self.draw_keycap(">", 190, 125)
+        text = self.hud_font.render("MOVE O MINERADOR", False, (255, 255, 255)); self.screen.blit(text, (285, 136))
+        self.draw_keycap("^", 115, 190)
+        text = self.hud_font.render("PULO", False, (255, 255, 255)); self.screen.blit(text, (205, 201))
+        self.draw_keycap("^", 115, 255); self.draw_keycap("^", 210, 255)
+        plus = self.info_font.render("+", False, (149, 255, 217)); self.screen.blit(plus, (181, 269))
+        text = self.hud_font.render("JET PACK", False, (255, 255, 255)); self.screen.blit(text, (300, 266))
+        self.draw_keycap("<", 115, 320); self.draw_keycap("<", 190, 320)
+        ou = self.info_font.render("OU", False, (255, 255, 255)); self.screen.blit(ou, (275, 334))
+        self.draw_keycap(">", 330, 320); self.draw_keycap(">", 405, 320)
+        text = self.hud_font.render("DASH", False, (255, 255, 255)); self.screen.blit(text, (505, 331))
+        lines = [
+            "QUANTO MAIS ALTO O MINERIO, MAIS PONTOS ELE VALE.",
+            "10 ENERGIA POR FASE.",
+            "MINERIOS AO CHAO E ATAQUES DE ROBOS TIRAM ENERGIA.",
+            "BOMBAS, REMEDIOS E DESACELERADORES AJUDAM.",
+        ]
+        for index, line in enumerate(lines):
+            text = self.info_font.render(line, False, (255, 255, 255))
+            self.screen.blit(text, text.get_rect(center=(WIDTH // 2, 385 + index * 24)))
+        prompt = self.info_font.render("[B] VOLTAR", False, (149, 255, 217))
+        self.screen.blit(prompt, prompt.get_rect(center=(WIDTH // 2, 500)))
+
+    def draw_menu_screen(self) -> None:
+        title = self.title_font.render("SPACE MINER", False, (112, 232, 157))
+        self.screen.blit(title, title.get_rect(center=(WIDTH // 2, 55)))
+        self.draw_high_scores(125)
+        start = self.hud_font.render("[SPACE] COMECAR O JOGO", False, (255, 255, 255))
+        how_to = self.hud_font.render("[A] COMO JOGAR", False, (149, 255, 217))
+        self.screen.blit(start, start.get_rect(center=(WIDTH // 2, 420)))
+        self.screen.blit(how_to, how_to.get_rect(center=(WIDTH // 2, 460)))
+
+    def draw_story_screen(self) -> None:
+        heading = self.title_font.render("SPACE MINER", False, (112, 232, 157))
+        lines = [
+            "OS ROBOS MINERADORES DO CINTURAO DE CERES SE REBELARAM,",
+            "MAS A MINERACAO NAO PODE PARAR!",
+            "VOCE TEM SEU JET PACK E UM SONHO:",
+            "COLETAR O MAXIMO DE MINERIOS ANTES QUE PERCAM VALOR",
+            "ENQUANTO DESVIA DOS ATAQUES MORTAIS DAS MAQUINAS ENLOUQUECIDAS.",
+            "A CORPORACAO CONTA COM VOCE!",
+        ]
+        self.screen.blit(heading, heading.get_rect(center=(WIDTH // 2, 75)))
+        for index, line in enumerate(lines):
+            text = self.info_font.render(line, False, (255, 255, 255))
+            self.screen.blit(text, text.get_rect(center=(WIDTH // 2, 155 + index * 42)))
+        prompt = self.hud_font.render("[SPACE] COMECAR", False, (149, 255, 217))
+        self.screen.blit(prompt, prompt.get_rect(center=(WIDTH // 2, 455)))
+
+    def present(self) -> None:
+        window_width, window_height = self.window.get_size()
+        scale = min(window_width / WIDTH, window_height / HEIGHT)
+        target_size = (round(WIDTH * scale), round(HEIGHT * scale))
+        scaled_screen = pygame.transform.scale(self.screen, target_size)
+        self.window.fill((0, 0, 0))
+        self.window.blit(scaled_screen, ((window_width - target_size[0]) // 2, (window_height - target_size[1]) // 2))
+        pygame.display.flip()
+
     def draw(self) -> None:
+        if self.menu_screen or self.story_screen or self.instructions_screen:
+            self.screen.blit(self.menu_background, (0, 0))
+            if self.menu_screen:
+                self.draw_menu_screen()
+            elif self.story_screen:
+                self.draw_story_screen()
+            else:
+                self.draw_instructions_screen()
+            self.present()
+            return
         self.screen.fill(BACKGROUND_COLOR)
         self.screen.blit(self.background, (0, 0))
         pygame.draw.rect(self.screen, GROUND_COLOR, (0, GROUND_TOP, WIDTH, HEIGHT - GROUND_TOP))
@@ -454,43 +562,14 @@ class Game:
                 feedback_surface.blit(outlined, (offset_x, offset_y))
             feedback_surface.blit(rendered, (2, 2))
             feedback_surface.set_alpha(opacity)
-            self.screen.blit(feedback_surface, feedback_surface.get_rect(center=position))
+            # O feedback pode nascer junto ao topo ou às laterais. Mantê-lo dentro
+            # da viewport evita que o valor seja cortado antes de o jogador vê-lo.
+            feedback_rect = feedback_surface.get_rect(center=(round(position.x), round(position.y)))
+            feedback_rect.clamp_ip(self.screen.get_rect().inflate(-6, -6))
+            self.screen.blit(feedback_surface, feedback_rect)
         if self.game_over or self.phase_complete:
             self.draw_overlay()
-        if self.story_screen:
-            overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-            overlay.fill((3, 7, 18, 225))
-            self.screen.blit(overlay, (0, 0))
-            heading = self.title_font.render("HISTORIA", False, (255, 183, 75))
-            lines = [
-                "NA ESTACAO MINERADORA DO CINTURAO DE CERES,",
-                "AS MAQUINAS SE REBELARAM.",
-                "ELAS ABANDONARAM A MINERACAO E AGORA ATACAM.",
-                "USE SEU JET PACK PARA COLETAR MINERAIS",
-                "E DESVIE DOS ROBOS REBELDES.",
-                "APERTE QUALQUER TECLA PARA CONTINUAR",
-            ]
-            self.screen.blit(heading, heading.get_rect(center=(WIDTH // 2, 82)))
-            for index, line in enumerate(lines):
-                text = self.hud_font.render(line, False, (255, 255, 255))
-                self.screen.blit(text, text.get_rect(center=(WIDTH // 2, 155 + index * 48)))
-        elif self.instructions_screen:
-            overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-            overlay.fill((3, 7, 18, 225))
-            self.screen.blit(overlay, (0, 0))
-            heading = self.title_font.render("COMO JOGAR", False, (112, 232, 157))
-            lines = [
-                "A/D OU SETAS: MOVER", "W, CIMA OU ESPACO: PULAR", "VOCE TEM PULO DUPLO.",
-                "TOQUE DUAS VEZES ESQUERDA OU DIREITA: DASH.", "QUANTO MAIS CEDO PEGAR UM MINERAL, MAIS PONTOS VALE.",
-                "MINERAIS BAIXOS PODEM VALER NEGATIVO,", "MAS E MELHOR QUE PERDER UMA VIDA.",
-                "A CADA FASE, SUA ENERGIA VOLTA A 10.", "ENERGIA PRESERVADA GERA BONUS DE PONTOS.",
-                "APERTE QUALQUER TECLA PARA CONTINUAR",
-            ]
-            self.screen.blit(heading, heading.get_rect(center=(WIDTH // 2, 65)))
-            for index, line in enumerate(lines):
-                text = self.info_font.render(line, False, (255, 255, 255))
-                self.screen.blit(text, text.get_rect(center=(WIDTH // 2, 125 + index * 36)))
-        elif self.title_screen:
+        if self.title_screen:
             overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
             overlay.fill((3, 7, 18, 215))
             self.screen.blit(overlay, (0, 0))
@@ -506,13 +585,7 @@ class Game:
             flash = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
             flash.fill((255, 255, 255, round(220 * self.bomb_flash_ms / 150)))
             self.screen.blit(flash, (0, 0))
-        window_width, window_height = self.window.get_size()
-        scale = min(window_width / WIDTH, window_height / HEIGHT)
-        target_size = (round(WIDTH * scale), round(HEIGHT * scale))
-        scaled_screen = pygame.transform.scale(self.screen, target_size)
-        self.window.fill((0, 0, 0))
-        self.window.blit(scaled_screen, ((window_width - target_size[0]) // 2, (window_height - target_size[1]) // 2))
-        pygame.display.flip()
+        self.present()
 
     def run(self) -> None:
         while self.running:
