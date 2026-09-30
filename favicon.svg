@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Capacete do astronauta do Space Miner">
+  <rect width="64" height="64" rx="12" fill="#111f2f"/>
+  <path d="M13 34V27C13 14 21 8 32 8s19 6 19 19v18H13z" fill="#67e8b0"/>
+  <path d="M11 35h42v12H11z" fill="#111f2f"/>
+  <path d="M17 27c0-9 6-15 15-15s15 6 15 15v5H17z" fill="#e0ffdb"/>
+  <path d="M31 18h13v11H31z" fill="#ffcf4c"/>
+  <path d="M15 38h34v8H15z" fill="#67e8b0"/>
+  <path d="M7 31h8v15H7zm42 0h8v15h-8z" fill="#67e8b0"/>
+</svg>

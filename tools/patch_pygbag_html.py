@@ -1,4 +1,4 @@
-"""Remove referência obsoleta ao BrowserFS no template do Pygbag 0.9.3."""
+"""Ajusta o template do Pygbag para o Space Miner."""
 
 from pathlib import Path
 import re
@@ -25,6 +25,30 @@ def main() -> None:
     )
     if replacements != 1:
         raise RuntimeError(f"Esperava versionar 1 arquivo do jogo; encontrei {replacements}.")
+    fixed, replacements = re.subn(r"<title>.*?</title>", "<title>Space Miner</title>", fixed, count=1)
+    if replacements != 1:
+        raise RuntimeError(f"Esperava substituir 1 título; encontrei {replacements}.")
+    fixed, replacements = re.subn(
+        r'<link rel="icon" type="image/png" href="favicon\.png" sizes="16x16">',
+        f'<link rel="icon" type="image/svg+xml" href="favicon.svg?v={revision}">',
+        fixed,
+        count=1,
+    )
+    if replacements != 1:
+        raise RuntimeError(f"Esperava substituir 1 favicon; encontrei {replacements}.")
+    fixed = fixed.replace('platform.document.body.style.background = "#7f7f7f"', 'platform.document.body.style.background = "#000000"')
+    loader_theme = """
+    <style id="space-miner-loader-theme">
+        html, body { background: #000 !important; }
+        #transfer { position: fixed; inset: 0; display: flex !important; flex-direction: column;
+                    align-items: center; justify-content: center; gap: 14px; background: #000; }
+        #status { margin: 0; color: #fff; font: 600 18px/1.4 Arial, sans-serif; }
+        #progress { accent-color: #fff; }
+        #infobox { background: transparent; color: #fff; padding: 0; font: 600 18px/1.4 Arial, sans-serif;
+                   text-align: center; box-shadow: none; }
+    </style>
+    """
+    fixed = fixed.replace("</head>", loader_theme + "</head>", 1)
     page.write_text(fixed, encoding="utf-8")
 
 
