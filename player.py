@@ -30,7 +30,7 @@ class Player:
         self.jetpack_mode = ""
         self.dash_velocity = 0.0
 
-    def jump(self) -> None:
+    def jump(self) -> bool:
         if self.jumps_remaining > 0:
             self.velocity_y = -JUMP_SPEED
             self.jumps_remaining -= 1
@@ -39,6 +39,8 @@ class Player:
             if self.jumps_remaining == 0:
                 self.jetpack_time = 0.34
                 self.jetpack_mode = "jump"
+            return self.jumps_remaining == 0
+        return False
 
     def dash(self, direction: int) -> None:
         """Impulso horizontal de jetpack, disponível no chão e no ar."""
@@ -47,7 +49,8 @@ class Player:
         self.jetpack_time = 0.28
         self.jetpack_mode = "dash"
 
-    def update(self, dt: float) -> None:
+    def update(self, dt: float) -> bool:
+        was_on_ground = self.on_ground
         keys = pygame.key.get_pressed()
         direction = int(keys[pygame.K_d] or keys[pygame.K_RIGHT]) - int(keys[pygame.K_a] or keys[pygame.K_LEFT])
         if direction:
@@ -82,6 +85,7 @@ class Player:
         else:
             self.state = "idle"
         self.rect.topleft = (round(self.position.x), round(self.position.y))
+        return self.on_ground and not was_on_ground
 
     def _sprite(self) -> pygame.Surface:
         """Monta um sprite pixelado 14×16, ampliado sem suavização."""

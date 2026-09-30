@@ -27,7 +27,9 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install pygbag
       - run: python tools/build_web_source.py
-      - run: python -m pygbag --build --ume_block=0 .web-source
+      # O navegador libera áudio somente depois de um clique/toque. Sem
+      # --ume_block=0, o Pygbag aguarda essa interação antes de iniciar o jogo.
+      - run: python -m pygbag --build .web-source
       - run: python tools/patch_pygbag_html.py .web-source/build/web/index.html "$GITHUB_SHA"
       - uses: actions/upload-pages-artifact@v3
         with:

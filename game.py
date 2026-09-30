@@ -6,6 +6,7 @@ import sys
 import pygame
 
 from falling_number import FallingNumber
+from audio import Audio
 if sys.platform == "emscripten":
     from global_scores import GlobalScores
 else:
@@ -29,6 +30,7 @@ class Game:
 
     def __init__(self) -> None:
         pygame.init()
+        self.audio = Audio()
         # Toda a lógica desenha na resolução-base; a janela só apresenta uma versão ampliada.
         self.window = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.RESIZABLE)
         self.screen = pygame.Surface((WIDTH, HEIGHT))
@@ -69,10 +71,12 @@ class Game:
         self.phase_complete = False
         self.damage_flash_ms = 0.0
         self.monster: Monster | None = None
+        self.audio.stop_monster()
         self.monster_roll_ms = 0.0
         self.powerups: dict[str, Powerup | None] = {"medkit": None, "clock": None, "bomb": None}
         self.powerup_roll_ms = {"medkit": 0.0, "clock": 0.0, "bomb": 0.0}
         self.slow_motion_ms = 0.0
+        self.audio.set_slow(False)
         self.bomb_flash_ms = 0.0
         self.background = self.generate_background()
 
@@ -119,8 +123,10 @@ class Game:
     def lose_energy(self, amount: int) -> None:
         self.energy = max(0, self.energy - amount)
         self.damage_flash_ms = 140
+        self.audio.play("ouch")
         if self.energy <= 0:
             self.game_over = True
+            self.audio.stop_monster()
             self.name_entry = self.high_scores.qualifies(self.score, self.phase)
 
     def save_score(self) -> None:
@@ -159,7 +165,10 @@ class Game:
     def finish_phase(self) -> None:
         self.phase_bonus = self.energy * self.ENERGY_BONUS
         self.numbers.clear()  # Números da fase anterior não continuam na próxima.
+        self.monster = None
+        self.audio.stop_monster()
         self.phase_complete = True
+        self.audio.play("celebrate")
 
     def handle_events(self) -> None:
         for event in pygame.event.get():
@@ -173,20 +182,25 @@ class Game:
                 elif self.story_screen:
                     self.story_screen = False
                     self.instructions_screen = True
+                    self.audio.play("poc")
                 elif self.instructions_screen:
                     self.instructions_screen = False
                     self.title_screen = True
+                    self.audio.play("poc")
                 elif self.title_screen:
                     self.title_screen = False
+                    self.audio.play("poc")
                 elif not self.game_over and not self.phase_complete and event.key in (pygame.K_a, pygame.K_LEFT, pygame.K_d, pygame.K_RIGHT):
                     direction = -1 if event.key in (pygame.K_a, pygame.K_LEFT) else 1
                     now = pygame.time.get_ticks()
                     if now - self.last_direction_tap[direction] <= 250:
                         self.player.dash(direction)
+                        self.audio.play("vuush")
                     self.last_direction_tap[direction] = now
                 elif self.game_over and event.key in (pygame.K_r, pygame.K_RETURN, pygame.K_SPACE):
                     if not self.name_entry:
                         self.reset()
+                        self.audio.play("poc")
                 elif self.phase_complete and event.key in (pygame.K_RETURN, pygame.K_SPACE):
                     if not self.phase_bonus_awarded:
                         self.score += self.phase_bonus
@@ -194,13 +208,16 @@ class Game:
                     else:
                         self.phase += 1
                         self.start_phase()
+                    self.audio.play("poc")
                 elif not self.game_over and event.key in (pygame.K_w, pygame.K_UP, pygame.K_SPACE):
-                    self.player.jump()
+                    if self.player.jump():
+                        self.audio.play("vuush")
                 elif self.name_entry:
                     if event.key == pygame.K_BACKSPACE:
                         self.initials = self.initials[:-1]
                     elif event.unicode.isalpha() and len(self.initials) < 3:
                         self.initials += event.unicode.upper()
+                        self.audio.play("poc")
                         if len(self.initials) == 3:
                             self.save_score()
 
@@ -222,12 +239,19 @@ class Game:
     def detonate_bomb(self) -> None:
         """Destrói tudo em cena; minerais comuns contam como coleta pontuada."""
         for number in self.numbers:
-            if not number.radioactive:
+            if number.radioactive:
+                self.score += 10
+                self.add_feedback(10, number.rect.midtop)
+            else:
                 self.score += number.current_value
                 self.collected += 1
                 self.add_feedback(number.current_value, number.rect.midtop)
         self.numbers.clear()
+        if self.monster:
+            self.score += 10
+            self.add_feedback(10, self.monster.rect.midtop)
         self.monster = None
+        self.audio.stop_monster()
         for kind in self.powerups:
             self.powerups[kind] = None
         self.bomb_flash_ms = 150
@@ -245,9 +269,12 @@ class Game:
                     self.powerups[kind] = None
                     if kind == "medkit":
                         self.energy = 10
+                        self.audio.play("medkit")
                     elif kind == "clock":
-                        self.slow_motion_ms = 3_000
+                        self.slow_motion_ms = 5_000
+                        self.audio.set_slow(True)
                     else:
+                        self.audio.play("bomb")
                         self.detonate_bomb()
                         return
             else:
@@ -263,9 +290,13 @@ class Game:
         self.update_explosions(dt)
         if self.story_screen or self.instructions_screen or self.title_screen or self.game_over or self.phase_complete:
             return
+        was_slow = self.slow_motion_ms > 0
         self.slow_motion_ms = max(0, self.slow_motion_ms - dt * 1000)
+        if was_slow and self.slow_motion_ms == 0:
+            self.audio.set_slow(False)
         slowed_dt = dt * (0.10 if self.slow_motion_ms > 0 else 1.0)
-        self.player.update(dt)
+        if self.player.update(dt):
+            self.audio.play("tuf")
         self.spawn_elapsed_ms += slowed_dt * 1000
         if self.spawn_elapsed_ms >= self.spawn_interval_ms() and len(self.numbers) < self.max_numbers():
             self.numbers.append(FallingNumber())
@@ -273,21 +304,26 @@ class Game:
         if self.monster:
             if self.monster.update(slowed_dt):
                 self.monster = None
+                self.audio.stop_monster()
             elif self.player.rect.colliderect(self.monster.rect):
+                self.audio.play("impact")
                 self.lose_energy(3)
                 self.monster = None
+                self.audio.stop_monster()
         else:
             self.monster_roll_ms += dt * 1000
             if self.monster_roll_ms >= 1_000:
                 self.monster_roll_ms -= 1_000
                 if random.random() < self.monster_chance():
                     self.monster = Monster(random.choice((True, False)), self.monster_speed())
+                    self.audio.start_monster()
 
         for number in self.numbers[:]:
             reached_ground = number.update(slowed_dt)
             if self.player.rect.colliderect(number.rect):
                 self.numbers.remove(number)
                 if number.radioactive:
+                    self.audio.play("impact")
                     self.lose_energy(2)
                     if self.game_over:
                         break
@@ -295,6 +331,7 @@ class Game:
                     self.score += number.current_value
                     self.collected += 1
                     self.add_feedback(number.current_value, number.rect.midtop)
+                    self.audio.play("mineral")
                     if self.collected >= self.numbers_needed():
                         self.finish_phase()
                         break
@@ -302,6 +339,7 @@ class Game:
                 self.score += number.current_value
                 if not number.radioactive:
                     self.lose_energy(1)
+                self.audio.play("impact")
                 self.add_explosion(number.rect.midbottom)
                 self.numbers.remove(number)
                 if self.game_over:
