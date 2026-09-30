@@ -47,7 +47,7 @@ def main() -> None:
         /* O jogo conserva 16:9 e ocupa 80% da altura da janela. */
         #canvas { width: 142.222vh !important; height: 80vh !important; }
         /* Em telas estreitas, contém o jogo sem ultrapassar a largura disponível. */
-        @media (max-aspect-ratio: 16/9) {
+        @media (max-aspect-ratio: 4/3) {
             #canvas { width: 100vw !important; height: 56.25vw !important; }
         }
         #infobox { background: transparent; color: #fff; padding: 0; font: 600 18px/1.4 Arial, sans-serif;
