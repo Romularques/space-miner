@@ -44,9 +44,12 @@ def main() -> None:
                     align-items: center; justify-content: center; gap: 14px; background: #000; }
         #status { margin: 0; color: #fff; font: 600 18px/1.4 Arial, sans-serif; }
         #progress { accent-color: #fff; }
-        /* O jogo conserva a proporção 16:9 e ocupa 80% da altura da janela. */
-        #canvas { width: auto !important; height: 80vh !important; max-width: 100vw !important;
-                  max-height: 80vh !important; }
+        /* O jogo conserva 16:9 e ocupa 80% da altura da janela. */
+        #canvas { width: 142.222vh !important; height: 80vh !important; }
+        /* Em telas estreitas, contém o jogo sem ultrapassar a largura disponível. */
+        @media (max-aspect-ratio: 16/9) {
+            #canvas { width: 100vw !important; height: 56.25vw !important; }
+        }
         #infobox { background: transparent; color: #fff; padding: 0; font: 600 18px/1.4 Arial, sans-serif;
                    text-align: center; box-shadow: none; }
     </style>
