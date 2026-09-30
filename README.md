@@ -90,7 +90,7 @@ Para testar antes do push, instale Pygbag e gere a versão web:
 ```powershell
 python -m pip install pygbag
 python tools/build_web_source.py
-python -m pygbag .web-source
+python -m pygbag --ume_block=0 .web-source
 ```
 
 Abra o endereço local informado pelo Pygbag no navegador. O diretório `build/`
