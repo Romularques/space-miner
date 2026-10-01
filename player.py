@@ -107,7 +107,7 @@ class Player:
             pygame.draw.rect(image, color, (x * s, y * s, w * s, h * s))
         return pygame.transform.flip(image, True, False) if not self.facing_right else image
 
-    def draw(self, surface: pygame.Surface) -> None:
+    def draw(self, surface: pygame.Surface, shield_ms: float = 0.0) -> None:
         # A chama é desenhada atrás da mochila apenas durante o pulo duplo.
         if self.jetpack_time > 0:
             flame_size = 28 if self.jetpack_frame else 20
@@ -120,4 +120,11 @@ class Player:
                 backpack_x = self.rect.x + (0 if self.facing_right else self.rect.width - 18)
                 pygame.draw.rect(surface, (255, 92, 54), (backpack_x, self.rect.y + 49, 18, flame_size))
                 pygame.draw.rect(surface, (255, 218, 75), (backpack_x + 5, self.rect.y + 52, 8, flame_size - 7))
-        surface.blit(self._sprite(), self.rect.topleft)
+        sprite = self._sprite()
+        if shield_ms > 0:
+            # O próprio sprite oscila rapidamente até verde-limão, sem criar uma moldura externa.
+            pulse = (pygame.time.get_ticks() // 75) % 2
+            tint = pygame.Surface(sprite.get_size(), pygame.SRCALPHA)
+            tint.fill((126, 255, 38, 175 if pulse else 45))
+            sprite.blit(tint, (0, 0))
+        surface.blit(sprite, self.rect.topleft)

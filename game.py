@@ -27,6 +27,28 @@ class Game:
     BASE_GOAL_PER_PHASE = 10
     EXTRA_GOAL_PER_PHASE = 2
     ENERGY_BONUS = 5
+    MINER_QUOTES = (
+        ("QUEM GUARDA ENERGIA HOJE,", "MINERA MAIS LONGE AMANHA.", "JEAN-LUC VON HARTWELL DE LA VEGA"),
+        ("NENHUM MINERIO VALE MAIS", "QUE UMA VOLTA SEGURA PARA CASA.", "MARIE-CLAIRE VON ASHFORD DEL RIO"),
+        ("POEIRA COSMICA NO CAPACETE", "E SINAL DE UM TURNO BEM FEITO.", "ETIENNE FALKNER DE MONTOYA"),
+        ("QUEM OUVE O RADAR", "JANTA COM A EQUIPE.", "BEATRICE VON CALDWELL SERRANO"),
+        ("O MELHOR MAPA DE ASTEROIDES", "CABE NUMA BOA MEMORIA.", "LUCIEN HARTMANN DE WELLES"),
+        ("TURNO CALMO NAO E SORTE,", "E JET PACK BEM ABASTECIDO.", "ANAIS VON REDFORD SALAZAR"),
+        ("MINERADOR APRESSADO", "PERDE MAIS QUE POEIRA ESTELAR.", "OLIVIER KRAUSS DE STERLING"),
+        ("QUANDO O CEU PISCA VERMELHO,", "E HORA DE OLHAR PARA CIMA.", "CELESTE VON BRADFORD IBARRA"),
+        ("UMA PAUSA NO OXIGENIO", "TAMBEM FAZ PARTE DO TRABALHO.", "MARCEL WHITAKER DE HOHENBERG"),
+        ("BOM MINERADOR CONHECE", "O SOM DE CADA PEDRA CAINDO.", "ELISE VON GRANT MORALES"),
+        ("A GRAVIDADE NAO DISCUTE,", "ENTAO MELHOR NAO DISCUTIR COM ELA.", "HUGO LANCASTER DE FALKEN"),
+        ("NUNCA CHAME UM ROBO DE AMIGO", "ANTES DO FIM DO TURNO.", "CAMILLE VON SPENCER ARANDA"),
+        ("QUEM CONTA ESTRELAS DEMAIS", "ESQUECE DE CONTAR A ENERGIA.", "THEO BEAUMONT DE KRUGER"),
+        ("O CAFE DA ESTACAO E RUIM,", "MAS O VAZIO ESPACIAL E PIOR.", "ISABELLE HARTLEY DEL CASTILLO"),
+        ("UM BOM DASH ECONOMIZA", "MAIS PASSOS QUE UM BOM CONSELHO.", "FELIX VON MARLOWE ORTEGA"),
+        ("CAPACETE LIMPO, RADAR LIGADO,", "DIA DE TRABALHO RESOLVIDO.", "SOPHIE KENDAL DE BISMARCK"),
+        ("TODO ASTEROIDE PARECE PEQUENO", "ATE CAIR NO LUGAR ERRADO.", "ADRIEN WOLFE DE NAVARRO"),
+        ("QUEM VOLTA COM ENERGIA", "VOLTA PARA MINERAR AMANHA.", "CLARA VON WESTBROOK MOLINA"),
+        ("A BOMBA RESOLVE PROBLEMAS,", "MAS NAO ARRUMA O CAFETEIRO.", "PASCAL HAWTHORNE DE ROJAS"),
+        ("EM CERES, CHEGAR CEDO", "E CHEGAR ANTES DOS ROBOS.", "VIVIENNE VON ALDER CORTES"),
+    )
 
     def __init__(self) -> None:
         pygame.init()
@@ -75,9 +97,10 @@ class Game:
         self.monster: Monster | None = None
         self.audio.stop_monster()
         self.monster_roll_ms = 0.0
-        self.powerups: dict[str, Powerup | None] = {"medkit": None, "clock": None, "bomb": None}
-        self.powerup_roll_ms = {"medkit": 0.0, "clock": 0.0, "bomb": 0.0}
+        self.powerups: dict[str, Powerup | None] = {"medkit": None, "clock": None, "bomb": None, "shield": None}
+        self.powerup_roll_ms = {"medkit": 0.0, "clock": 0.0, "bomb": 0.0, "shield": 0.0}
         self.slow_motion_ms = 0.0
+        self.shield_ms = 0.0
         self.audio.set_slow(False)
         self.bomb_flash_ms = 0.0
         self.background = self.generate_background()
@@ -140,6 +163,8 @@ class Game:
         self.story_screen = self.instructions_screen = self.title_screen = False
 
     def lose_energy(self, amount: int) -> None:
+        if self.shield_ms > 0:
+            return
         self.energy = max(0, self.energy - amount)
         self.damage_flash_ms = 140
         self.audio.play("ouch")
@@ -230,7 +255,7 @@ class Game:
                     if event.key == pygame.K_SPACE:
                         self.return_to_menu()
                         self.audio.play("poc")
-                elif self.phase_complete and event.key in (pygame.K_RETURN, pygame.K_SPACE):
+                elif self.phase_complete and event.key == pygame.K_SPACE:
                     if not self.phase_bonus_awarded:
                         self.score += self.phase_bonus
                         self.phase_bonus_awarded = True
@@ -302,6 +327,8 @@ class Game:
                     elif kind == "clock":
                         self.slow_motion_ms = 5_000
                         self.audio.set_slow(True)
+                    elif kind == "shield":
+                        self.shield_ms = 5_000
                     else:
                         self.audio.play("bomb")
                         self.detonate_bomb()
@@ -321,11 +348,14 @@ class Game:
             return
         was_slow = self.slow_motion_ms > 0
         self.slow_motion_ms = max(0, self.slow_motion_ms - dt * 1000)
+        self.shield_ms = max(0, self.shield_ms - dt * 1000)
         if was_slow and self.slow_motion_ms == 0:
             self.audio.set_slow(False)
         slowed_dt = dt * (0.10 if self.slow_motion_ms > 0 else 1.0)
         if self.player.update(dt):
             self.audio.play("tuf")
+        # Bônus devem valer já no mesmo quadro em que são alcançados.
+        self.update_powerups(dt, slowed_dt)
         self.spawn_elapsed_ms += slowed_dt * 1000
         if self.spawn_elapsed_ms >= self.spawn_interval_ms() and len(self.numbers) < self.max_numbers():
             self.numbers.append(FallingNumber())
@@ -336,7 +366,12 @@ class Game:
                 self.audio.stop_monster()
             elif self.player.rect.colliderect(self.monster.rect):
                 self.audio.play("impact")
-                self.lose_energy(3)
+                if self.shield_ms > 0:
+                    self.score += 10
+                    self.add_feedback(10, self.monster.rect.midtop)
+                    self.add_explosion(self.monster.rect.midbottom)
+                else:
+                    self.lose_energy(3)
                 self.monster = None
                 self.audio.stop_monster()
         else:
@@ -353,7 +388,12 @@ class Game:
                 self.numbers.remove(number)
                 if number.radioactive:
                     self.audio.play("impact")
-                    self.lose_energy(2)
+                    if self.shield_ms > 0:
+                        self.score += 10
+                        self.add_feedback(10, number.rect.midtop)
+                        self.add_explosion(number.rect.midbottom)
+                    else:
+                        self.lose_energy(2)
                     if self.game_over:
                         break
                 else:
@@ -373,7 +413,6 @@ class Game:
                 self.numbers.remove(number)
                 if self.game_over:
                     break
-        self.update_powerups(dt, slowed_dt)
         self.update_feedbacks(dt)
 
     def draw_hud(self) -> None:
@@ -414,20 +453,25 @@ class Game:
         else:
             title = self.title_font.render(f"FASE {self.phase} CONCLUÍDA!", False, (110, 235, 152))
             if self.phase_bonus_awarded:
+                quote_first, quote_second, quote_author = self.MINER_QUOTES[(self.phase - 1) % len(self.MINER_QUOTES)]
                 lines = [
                     f"Bônus de energia adicionado: {self.energy} × {self.ENERGY_BONUS} = +{self.phase_bonus}",
                     f"Pontuação total: {self.score}",
-                    "Pressione Enter ou Espaço para a próxima fase",
+                    "",
+                    f'"{quote_first}',
+                    f'{quote_second}"',
+                    f"- {quote_author}",
+                    "",
+                    "[ESPACO] PROXIMA FASE",
                 ]
             else:
                 lines = [
-                    f"Você coletou {self.collected}/{self.numbers_needed()} minerais!",
                     f"Bônus de energia disponível: {self.energy} × {self.ENERGY_BONUS} = {self.phase_bonus}",
-                    "Pressione Enter ou Espaço para receber o bônus",
+                    "[ESPACO] RECEBER BONUS",
                 ]
         title_y = 74 if self.game_over else HEIGHT // 2 - 65
         line_y = 132 if self.game_over else HEIGHT // 2
-        line_spacing = 28 if self.game_over else 36
+        line_spacing = 28 if self.game_over else 32
         self.screen.blit(title, title.get_rect(center=(WIDTH // 2, title_y)))
         for index, line in enumerate(lines):
             text = self.hud_font.render(line, False, (255, 255, 255))
@@ -480,7 +524,7 @@ class Game:
             "QUANTO MAIS ALTO O MINERIO, MAIS PONTOS ELE VALE.",
             "10 ENERGIA POR FASE.",
             "MINERIOS AO CHAO E ATAQUES DE ROBOS TIRAM ENERGIA.",
-            "BOMBAS, REMEDIOS E DESACELERADORES AJUDAM.",
+            "BOMBAS, REMEDIOS, ESCUDOS E RELOGIOS AJUDAM.",
         ]
         for index, line in enumerate(lines):
             text = self.info_font.render(line, False, (255, 255, 255))
@@ -551,7 +595,7 @@ class Game:
         self.draw_explosions()
         if self.monster:
             self.monster.draw(self.screen)
-        self.player.draw(self.screen)
+        self.player.draw(self.screen, shield_ms=self.shield_ms)
         self.draw_hud()
         for text, position, elapsed in self.feedbacks:
             opacity = 255 if elapsed <= 500 else round(255 * max(0, 1 - (elapsed - 500) / 800))
